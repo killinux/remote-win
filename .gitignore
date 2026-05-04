@@ -1,0 +1,10 @@
+send_result.json
+send_stdout.txt
+server.log
+server.err
+server-test.log
+server_out.log
+server_err.log
+*.pyc
+__pycache__/
+.claude/
