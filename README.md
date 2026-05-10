@@ -1,206 +1,40 @@
-# RGBA 式 MMD 胸部物理绑定（Blender 插件）
+# Blender-MCP Remote Relay
 
-在 Blender 中复现 **"RGBA式おっぱい剛体 Ver1.5β"** 物理绑定方案，基于 **mmd_tools**。
-
-## 参考资料
-
-- 原始方案：[RGBA式おっぱい剛体の作り方](https://rgba.blog.jp/archives/10475373.html)
-- mmd_tools：[powroupi/blender_mmd_tools](https://github.com/UuuNyaa/blender_mmd_tools)
-- MikuMikuDance 刚体/关节文档：[VPVP Wiki](https://w.atwiki.jp/vpvpwiki/)
-- Bullet 物理引擎：[bulletphysics.org](https://bulletphysics.org/)
-
-## 原理
-
-### MMD 原版方案（零限制技巧）
-
-RGBA 方案的核心原理：在 MMD 的 Bullet 求解器中，当关节的移动/旋转限制设为 **0** 时，求解器精度误差会产生微小振荡。这种"数值泄漏"被巧妙利用为弹跳效果。
-
-具体机制：
-
-1. **静态父刚体**（上半身2）跟随骨骼运动
-2. **动态子刚体**（胸）通过关节连接到父刚体
-3. 关节限制全部设为 0（理论上完全锁死）
-4. 但 Bullet 求解器在每步计算中有微小误差
-5. 误差累积 → 子刚体产生微小位移 → 弹簧拉回 → 形成振荡
-6. 5 个刚体 + 8 个关节的链式结构放大了这种振荡
-
-关键参数影响：
-- **刚体大小**：越小振荡越大（最小建议 0.1）
-- **质量**：越大摆动越慢（"ゆっさゆっさ"），越小越容易抖动
-- **阻尼**：0.5~0.999，接近 1.0 产生蓬松感（"ふわふわ"）
-- **刚体/关节顺序**：放在列表靠后位置，求解更干净
-
-### Blender 的局限性
-
-**此零限制技巧在 Blender 中不适用**。原因：
-
-1. Blender 的 Bullet 实现比 MMD 更精确，零限制真的锁死了
-2. `COPY_ROTATION` 约束只传递旋转，不传递位移（但振荡本质是位移）
-3. `Dynamic+Bone`（类型 2）的刚体与骨骼形成循环依赖，物理偏移被抵消
-4. 即使用 `Dynamic`（类型 1）+ `COPY_TRANSFORMS`，Blender 的父子关系在物理烘焙后传递的位移也极小（实测 ~0.01 单位）
-
-### 替代方案：数学弹簧-阻尼器模拟
-
-绕过 Blender 物理系统，用经典弹簧-阻尼器公式直接计算弹跳：
+HTTP 中继，让任意机器上的 Claude Code 远程控制另一台机器上的 Blender。
 
 ```
-F = K * (target - pos) - D * velocity
-acceleration = F / mass
-velocity += acceleration * dt
-position += velocity * dt
-delta = position - target  （偏离量即为弹跳）
+Claude Code  -->  server.py (:8080)  <--轮询--  win_client.py  -->  Blender (:9876)
 ```
 
-将父骨骼（上半身2）每帧的世界旋转作为输入，模拟出胸部骨骼的旋转偏移，直接写入关键帧。
+## 启动
 
-## 环境要求
+```bash
+# 1. 启动中继服务器
+python server.py --port 8080
 
-- Blender 3.6 LTS 或更新版本（已在 3.6.15 上测试）
-- **mmd_tools** 插件已安装并启用（已在 1.0.2 上测试）
-- 通过 mmd_tools 导入的 MMD 模型
-
-## 安装
-
-1. 将 `RGBA_mmd/` 文件夹压缩为 `RGBA_mmd.zip`
-2. Blender → 编辑 → 偏好设置 → 插件 → 安装 → 选择 zip 文件
-3. 勾选启用 **RGBA-Style MMD Bust Rig**
-
-## 使用教程
-
-### 方式一：插件面板（Blender 物理方式）
-
-1. 通过 mmd_tools 导入 PMX 模型
-2. 选中模型内的任意对象（网格、骨骼、根 Empty 均可）
-3. 打开 3D 视图 N 面板 → **RGBA MMD** 标签
-4. 点击 **检测（Detect）**：确认找到胸部骨骼和父骨骼（`上半身2`）
-5. 根据需要调整面板中的参数（半径、质量、阻尼等）
-6. 点击 **应用（Apply RGBA Rig）**：每侧创建 5 个刚体 + 8 个关节
-7. 导入 VMD 动作文件
-8. 在时间轴按 **Alt+A** 播放
-
-撤销：点击 **移除（Remove RGBA Rig）** 删除本插件创建的所有对象。
-
-> **注意**：由于 Blender Bullet 的限制，此方式可能看不到明显弹跳。如无效果请使用方式二。
-
-### 方式二：数学弹簧模拟（推荐）
-
-此方式绕过 Blender 物理，直接将弹跳烘焙到骨骼关键帧，效果可靠。
-
-**步骤 1**：导入模型和动作，记录父骨骼旋转
-
-```python
-# 运行 sim_step1.py
-# 功能：导入 PMX + VMD，逐帧记录上半身2的世界旋转，保存到 parent_rot.json
+# 2. 在 Blender 所在机器启动客户端
+python win_client.py --server http://SERVER_IP:8080
 ```
 
-**步骤 2**：弹簧模拟 + 烘焙关键帧
+浏览器打开 `http://localhost:8080/status` 查看状态面板。
 
-```python
-# 运行 sim_step2.py
-# 功能：读取 parent_rot.json，运行弹簧模拟，将结果写入胸部骨骼关键帧
+## API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/command` | 提交命令（JSON body） |
+| GET  | `/commands/pending` | 客户端轮询待处理命令 |
+| GET  | `/command/{id}` | 查询命令状态 |
+| POST | `/command/{id}/response` | 客户端回传结果 |
+| GET  | `/status` | HTML 状态面板 |
+| GET  | `/api/status` | JSON 状态 |
+
+## 发送命令示例
+
+```powershell
+$body = @{ type = "execute_code"; params = @{ code = "import bpy; print(bpy.data.objects.keys())" } } | ConvertTo-Json
+$r = Invoke-RestMethod -Method Post -Uri "http://localhost:8080/command" -Body $body -ContentType "application/json"
+
+Start-Sleep 2
+Invoke-RestMethod -Uri "http://localhost:8080/command/$($r.id)"
 ```
-
-**步骤 3**：播放验证
-
-在 Blender 中按 **Alt+A** 播放，观察胸部弹跳效果。
-
-### 弹簧参数调节
-
-```python
-SPRING_K = 80.0    # 弹簧刚度（越低越松，摆幅越大）
-DAMPING  = 6.0     # 阻尼系数（越低振荡越久，越弹）
-MASS     = 1.0     # 质量（越大惯性越大，反应越迟钝）
-SCALE    = 3.0     # 结果放大倍数（直接控制可见幅度）
-DT       = 1/30    # 时间步长（对应 30fps）
-```
-
-**效果预设：**
-
-| 风格 | SPRING_K | DAMPING | MASS | SCALE | 描述 |
-|------|----------|---------|------|-------|------|
-| 慢摆荡 | 40~60 | 6~8 | 1.5~2.0 | 2~3 | ゆっさゆっさ，大幅度慢摇 |
-| 蓬松弹 | 80~100 | 3~4 | 1.0 | 2~3 | ふわふわ，轻盈回弹 |
-| 写实 | 100~150 | 10~15 | 1.0 | 1.5~2.0 | 自然收敛，不夸张 |
-| 夸张 | 60~80 | 4~6 | 1.0 | 4~5 | 动画风格，幅度明显 |
-
-## 每侧构建的对象
-
-| 对象 | 作用 | 动力学类型 | 骨骼绑定 |
-|------|------|-----------|---------|
-| `胸.L` | 主胸部刚体 | 动态+骨骼 | 胸部骨骼 |
-| `胸_後.L` | 位移锁定辅助体 | 动态 | 无 |
-| `胸_前.L` | 旋转辅助体 | 动态 | 无 |
-| `胸_回転.L` | 旋转虚拟体 | 动态 | 无 |
-| `胸_前後.L` | 前后移动辅助体 | 动态 | 无 |
-| `J.胸_後1/2.L` | 刚体-辅助体绑定，全轴锁定 | - | - |
-| `J.胸_前1/2.L` | 旋转链 | - | - |
-| `J.胸_回転1/2.L` | 旋转链 | - | - |
-| `J.胸_前後1/2.L` | 前后链（Y 轴自由） | - | - |
-
-右侧对称生成（`.R`）。后缀风格自动匹配模型现有骨骼命名。
-
-## 胸部骨骼检测
-
-匹配名称包含以下关键字的骨骼：
-
-- 日文：`胸`、`乳`
-- 英文：`bust`、`breast`、`chest`、`boob`、`oppai`、`tit`
-
-如果模型有骨骼链（如 `胸親` → `胸先`），插件只驱动链的**父骨骼**。
-
-父锚点骨骼默认 `上半身2`，回退 `上半身`。可在面板手动指定。
-
-## 可调参数（面板）
-
-| 参数 | 说明 |
-|------|------|
-| **Body Radius** | 主胸部刚体球半径，辅助体为 0.4 倍 |
-| **Main / Aux Mass** | 主/辅助刚体质量 |
-| **Linear / Angular Damping** | Bullet 线性/角度阻尼（0.5~0.999） |
-| **Strong / Loose Spring k** | 锁定轴/自由轴的弹簧刚度 |
-| **Spring Damping** | 关节弹簧阻尼 |
-| **Collision Group** | 碰撞组 1~16 |
-| **Position Along Bone** | 刚体沿骨骼位置（0=头部，1=尾端） |
-| **Z / Y Offset** | 手动 Z/Y 偏移 |
-| **Overwrite Existing** | 覆盖已有同名对象 |
-
-## 故障排除
-
-| 问题 | 解决方案 |
-|------|---------|
-| 播放时看不到弹跳 | 使用数学弹簧模拟方案（方式二） |
-| 模型变形/扭曲 | 重新导入 PMX，确保先验证形状不变再加物理 |
-| 刚体下落不锚定 | 提高 Strong Spring k |
-| 没有检测到胸部骨骼 | 重命名骨骼或在 `rig_builder.py` 添加关键字 |
-| 弹跳太大/太小 | 调节 SCALE 参数 |
-
-## 四种方式对比
-
-| 方式 | 状态 | Blender 可见 | MMD 可见 | 导出保留 | 原理 |
-|------|------|-------------|---------|---------|------|
-| **简单物理** | ✅ 可用 | ✅ | ✅ | ✅ | type=1 Dynamic + ±10° 关节，参考 Purifier Inase 18 |
-| **弹簧模拟** | ✅ 可用 | ✅ | ❌ 需重新运行 | ❌ | 数学弹簧-阻尼器 → 骨骼关键帧 |
-| **Wiggle 2** | ✅ 可用 | ✅ | ❌ 需烘焙 | ❌ | 骨骼级弹簧物理插件（需另装 Wiggle 2） |
-| **RGBA 5刚体** | ⚠️ 仅MMD | ❌ | ✅ | ✅ | 零限制技巧（仅 MMD Bullet 有效） |
-
-详细操作请参考 [用户手册](docs/user_manual.md) | [技术调研报告](docs/research_report.md)。
-
-## 注意事项
-
-- Blender Bullet 与 PMXEditor Bullet 行为不同，参数不可直接沿用
-- 本插件不会删除或修改非自身创建的刚体/关节（除非勾选 Overwrite）
-- Wiggle 2 需要单独安装：https://github.com/shteeve3d/blender-wiggle-2
-
-## TODO
-
-- [ ] RGBA 5刚体方案的 PMX 导出优化：调整关节弹簧参数使其在 MMD 中效果更接近原版 RGBA 博客的设置
-- [ ] 研究 mmd_tools build_rig 对 Dynamic+Bone (type=2) 的处理，尝试改进 Blender 中的可见性
-- [ ] 简单物理方案增加更多身体碰撞刚体（上半身、上半身1 等），参考 Purifier Inase 18 的完整刚体结构
-- [ ] 弹簧模拟增加按轴独立控制（X/Y/Z 各自的 Spring K 和 Scale）
-- [ ] 支持导出弹簧模拟结果为 VMD 动作文件
-- [ ] Wiggle 2 参数预设（慢摆荡/蓬松弹/写实/夸张）
-- [ ] 研究 BoneDynamics / UuuNyaa Tools 等其他插件集成
-
-## 许可证
-
-MIT
