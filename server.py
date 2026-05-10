@@ -2,8 +2,8 @@
 """
 Blender-MCP HTTP Relay Server — runs on Windows.
 
-Claude Code posts commands here. The Mac polls for them, forwards to
-blender-mcp, and posts results back.
+Claude Code posts commands here. The remote Win client polls for them,
+forwards to blender-mcp, and posts results back.
 
 Usage:
     python server.py --port 8080
@@ -23,7 +23,7 @@ class CommandStore:
     def __init__(self):
         self.commands = {}
         self.lock = threading.Lock()
-        self.mac_last_seen = None
+        self.win_last_seen = None
 
     def add(self, request):
         cmd_id = uuid.uuid4().hex[:8]
@@ -41,7 +41,7 @@ class CommandStore:
 
     def claim_next(self):
         with self.lock:
-            self.mac_last_seen = time.time()
+            self.win_last_seen = time.time()
             for cmd_id, cmd in sorted(self.commands.items(), key=lambda x: x[1]["created_at"]):
                 if cmd["status"] == "pending":
                     cmd["status"] = "processing"
@@ -67,10 +67,10 @@ class CommandStore:
             counts = {"pending": 0, "processing": 0, "completed": 0}
             for cmd in self.commands.values():
                 counts[cmd["status"]] = counts.get(cmd["status"], 0) + 1
-            mac_connected = self.mac_last_seen and (time.time() - self.mac_last_seen) < 10
+            win_connected = self.win_last_seen and (time.time() - self.win_last_seen) < 10
             return {
-                "mac_last_seen": self.mac_last_seen,
-                "mac_connected": mac_connected,
+                "win_last_seen": self.win_last_seen,
+                "win_connected": win_connected,
                 "queue": counts,
                 "total": len(self.commands),
             }
@@ -172,8 +172,8 @@ class RelayHandler(BaseHTTPRequestHandler):
     def _handle_status_html(self):
         stats = store.stats()
         recent = store.recent(15)
-        mac_status = "CONNECTED" if stats["mac_connected"] else "DISCONNECTED"
-        mac_color = "#4caf50" if stats["mac_connected"] else "#f44336"
+        win_status = "CONNECTED" if stats["win_connected"] else "DISCONNECTED"
+        win_color = "#4caf50" if stats["win_connected"] else "#f44336"
 
         rows = ""
         for cmd in recent:
@@ -205,7 +205,7 @@ th {{ color: #888; }}
 <body>
 <h2>Blender-MCP Relay</h2>
 <div class="status">
-Mac: <span style="color:{mac_color};font-weight:bold">{mac_status}</span>
+Win: <span style="color:{win_color};font-weight:bold">{win_status}</span>
 &nbsp;&nbsp;|&nbsp;&nbsp;
 Queue: {stats['queue']['pending']} pending, {stats['queue']['processing']} processing, {stats['queue']['completed']} completed
 </div>
@@ -237,6 +237,10 @@ Queue: {stats['queue']['pending']} pending, {stats['queue']['processing']} proce
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
+    def get_request(self):
+        conn, addr = super().get_request()
+        return conn, ("0.0.0.0", 0)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Blender-MCP HTTP Relay Server")
@@ -255,7 +259,7 @@ def main():
     server = ThreadedHTTPServer((args.host, args.port), RelayHandler)
     print(f"Relay server on http://{args.host}:{args.port}")
     print(f"  Status page: http://localhost:{args.port}/status")
-    print(f"  Mac client polls: http://YOUR_IP:{args.port}/commands/pending")
+    print(f"  Win client polls: http://YOUR_IP:{args.port}/commands/pending")
     print(f"  Submit command: POST http://localhost:{args.port}/command")
     print()
     try:

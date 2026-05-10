@@ -18,7 +18,7 @@ Blender + blender-mcp (:9876, 远程 Windows)
 
 ## 网络说明
 
-- `server.py` 监听 `0.0.0.0:8080`（仅本机直连）
+- `server.py` 监听 `0.0.0.0:8080`（支持直连或通过 nginx）
 - nginx 监听 `0.0.0.0:8081`，反向代理到 `127.0.0.1:8080`，对外暴露此端口供远程客户端连接
 - 远程 `win_client.py` 连接 `http://本机IP:8081`，隐藏远程机器 IP
 - nginx 配置位于 `C:\nginx-1.26.3\conf\nginx.conf`
@@ -46,7 +46,7 @@ Invoke-RestMethod -Uri "http://localhost:8080/command/$($r.id)"
 ## 检查状态
 
 ```powershell
-# JSON 状态（mac_connected 表示远程客户端是否在线）
+# JSON 状态（win_connected 表示远程客户端是否在线）
 Invoke-RestMethod -Uri "http://localhost:8080/api/status" | ConvertTo-Json
 
 # HTML 状态面板
@@ -56,7 +56,7 @@ Invoke-RestMethod -Uri "http://localhost:8080/api/status" | ConvertTo-Json
 ## 备注
 
 - 命令 1 小时后过期
-- 客户端最后轮询在 10 秒内视为已连接（`mac_connected`）
+- 客户端最后轮询在 10 秒内视为已连接（`win_connected`）
 - 远程 Blender 中**禁止**使用 `read_factory_settings`，会断开 blender-mcp 链路
-- `win_client.py` 的 `BlenderBridge` 超时 180 秒，期间会阻塞轮询导致 `mac_connected` 变 false
+- `win_client.py` 的 `BlenderBridge` 超时 180 秒，期间会阻塞轮询导致 `win_connected` 变 false
 - 如果命令长期卡在 `processing`，说明远程 Blender MCP 端口 (9876) 不通
